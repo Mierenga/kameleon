@@ -11,6 +11,8 @@ class LocationParser {
     this.rows = this.rows.filter(row => row);
     this.xCol = csvColumns.findIndex(column => column.key === 'longitude');
     this.yCol = csvColumns.findIndex(column => column.key === 'latitude');
+    this.wifiCol = csvColumns.findIndex(column => column.key === 'wifi');
+    this.timeCol = csvColumns.findIndex(column => column.key === 'timestamp');
   }
 
   getFirstLocation() { return this._getLocationObjectFromRow(this.rows[0]); }
@@ -19,17 +21,50 @@ class LocationParser {
     return this._getLocationObjectFromRow(this.rows[this.rows.length-1]); }
 
   getAllCoordinateStrings() {
+    this._assertCoordinates();
+    return this.rows.map(row => this._getLocationStringFromRow(row));
+  }
+
+  getAllWifiLocations() {
+    this._assertCoordinates();
+    return this.rows.map(row => {
+      let wifiResults = this._getWifiResultsFromRow(row);
+      if (!wifiResults || !wifiResults.length) { return null; }
+      let obj = {
+        location: this._getLocationObjectFromRow(row),
+        wifi: wifiResults,
+      };
+      return obj;
+    }).filter(row => row !== null);
+  }
+
+  _assertCoordinates() {
     if (this.xCol < 0 || this.yCol < 0) {
       throw new Error('Coordinate column unknown, latitude and longitude required in CSV Columns');
     }
-    return this.rows.map(row => this._getLocationStringFromRow(row));
   }
 
   _getLocationStringFromRow(row) {
     return row[this.xCol] + ',' + row[this.yCol];
   }
   _getLocationObjectFromRow(row) {
-    return { x: row[this.xCol], y: row[this.yCol] };
+    return { x: row[this.xCol], y: row[this.yCol], timestamp: row[this.timeCol] };
+  }
+  _getWifiResultsFromRow(row) {
+    return row[this.wifiCol]
+      .split("|")
+      .filter(entry => entry)
+      .map(result => {
+        let components = result.split('#');
+        while (components.length > 3) {
+          components.unshift(components.shift() + components.shift());
+        }
+        return {
+          ssid: components[0],
+          mac: components[1], 
+          rssi: components[2], 
+        };
+      })
   }
 };
 
@@ -50,17 +85,44 @@ class KMLGenerator {
         return `<Style id="routeStyle">
             <LineStyle id="ID">
                 <!-- inherited from ColorStyle -->
-                <color>ffffffff</color>            <!-- kml:color -->
+                <color>7fff00ff</color>
                 <colorMode>normal</colorMode>      <!-- colorModeEnum: normal or random -->
 
                 <!-- specific to LineStyle -->
-                <width>1</width>                            <!-- float -->
+                <width>3</width>                            <!-- float -->
                 <gx:outerColor>ffffffff</gx:outerColor>     <!-- kml:color -->
                 <gx:outerWidth>0.0</gx:outerWidth>          <!-- float -->
                 <gx:physicalWidth>0.0</gx:physicalWidth>    <!-- float -->
                 <gx:labelVisibility>0</gx:labelVisibility>  <!-- boolean -->
             </LineStyle>
-        </Style>`
+        </Style>
+        <Style id="wifi">
+          <IconStyle>
+            <Icon>
+              <href>http://maps.google.com/mapfiles/kml/shapes/target.png</href>
+            </Icon>
+            <hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/>
+          </IconStyle>
+        </Style>
+        <Style id="go">
+          <IconStyle>
+            <scale>2.0</scale>
+            <Icon>
+              <href>http://maps.google.com/mapfiles/kml/paddle/go.png</href>
+            </Icon>
+            <hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/>
+          </IconStyle>
+        </Style>
+        <Style id="stop">
+          <IconStyle>
+            <scale>2.0</scale>
+            <Icon>
+              <href>http://maps.google.com/mapfiles/kml/paddle/stop.png</href>
+            </Icon>
+            <hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/>
+          </IconStyle>
+        </Style>
+      `
   }
 
   placemark({
@@ -69,11 +131,21 @@ class KMLGenerator {
     visibility=1,
     x=80,
     y=43,
+    html=false,
+    styleId='',
+    when,
   }) {
+    let whenLine = when ? `<TimeStamp><when>${when}</when></TimeStamp>` : '';
         return `
         <Placemark>
             <name>${name}</name>
-            <description>${description}</description>
+            <styleUrl>#${styleId}</styleUrl>
+            ${whenLine}
+            <description>
+            ${html?'<![CDATA[':''}
+              ${description}
+            ${html?']]>':''}
+            </description>
             <gx:balloonVisibility>${visibility}</gx:balloonVisibility>
             <Point><coordinates>${x},${y}</coordinates></Point>
         </Placemark>`;
@@ -101,11 +173,7 @@ class KMLGenerator {
         </Document>
       </kml> 
       `
-
   }
-
-
-
 };
 
 let fs = require('fs')
@@ -130,10 +198,39 @@ function main() {
   let end = parser.getLastLocation();
 
   kmlLines.push(generator.head());
-  kmlLines.push(generator.placemark({x: start.x, y: start.y, name: 'Start', description: 'This is the first recorded location' }));
+  kmlLines.push(generator.style());
+  kmlLines.push(generator.placemark({
+    x: start.x,
+    y: start.y,
+    name: 'Start',
+    description: 'This is the first recorded location',
+    styleId: 'go',
+  }));
   kmlLines.push(generator.route({ coordinates: parser.getAllCoordinateStrings()}));
-  kmlLines.push(generator.placemark({x: end.x, y: end.y, name: 'Finish', description: 'This is the last recorded location' }));
+  kmlLines.push(generator.placemark({
+    x: end.x,
+    y: end.y,
+    name: 'Finish',
+    description: 'This is the last recorded location',
+    styleId: 'stop',
+  }));
+  kmlLines.push(parser.getAllWifiLocations().map(wifiScan => {
+    return generator.placemark({
+      x: wifiScan.location.x,
+      y: wifiScan.location.y,
+      styleId: 'wifi',
+      name: 'Wifi Scan',
+      when: wifiScan.location.timestamp,
+      html: true,
+      description: wifiScan.wifi.reduce((str, item) => {
+        str += '<span style="color: blue;">' + item.ssid + '</span> <span style="color: gray;">' + item.mac + '</span> <i>rssi:' + item.rssi + '</i><br>';
+        return str;
+      }, ''),
+    });
+  }));
   kmlLines.push(generator.tail());
+
+  parser.getAllWifiLocations();
 
   console.log(kmlLines.join('\n'));
 }
