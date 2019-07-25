@@ -1,4 +1,5 @@
 'use strict';
+
 class LocationParser {
   constructor(filename, csvColumns, header=true) {
     this.filename = filename;
@@ -13,16 +14,21 @@ class LocationParser {
     this.yCol = csvColumns.findIndex(column => column.key === 'latitude');
     this.wifiCol = csvColumns.findIndex(column => column.key === 'wifi');
     this.timeCol = csvColumns.findIndex(column => column.key === 'timestamp');
+    this.radiusCol = csvColumns.findIndex(column => column.key === 'radius');
   }
 
   getFirstLocation() { return this._getLocationObjectFromRow(this.rows[0]); }
 
-  getLastLocation() {
-    return this._getLocationObjectFromRow(this.rows[this.rows.length-1]); }
+  getLastLocation() { return this._getLocationObjectFromRow(this.rows[this.rows.length-1]); }
 
   getAllCoordinateStrings() {
     this._assertCoordinates();
     return this.rows.map(row => this._getLocationStringFromRow(row));
+  }
+
+  getAllLocations() {
+    this._assertCoordinates();
+    return this.rows.map(row => this._getLocationObjectFromRow(row));
   }
 
   getAllWifiLocations() {
@@ -48,7 +54,12 @@ class LocationParser {
     return row[this.xCol] + ',' + row[this.yCol];
   }
   _getLocationObjectFromRow(row) {
-    return { x: row[this.xCol], y: row[this.yCol], timestamp: row[this.timeCol] };
+    return {
+      x: parseFloat(row[this.xCol]),
+      y: parseFloat(row[this.yCol]),
+      timestamp: row[this.timeCol],
+      radius: parseFloat(row[this.radiusCol]),
+    };
   }
   _getWifiResultsFromRow(row) {
     return row[this.wifiCol]
@@ -70,40 +81,62 @@ class LocationParser {
 
 class KMLGenerator {
   constructor() {
-    this.indent = 0;
   }
   head() {
-    this.indent += 1;
       return `<?xml version="1.0" encoding="UTF-8"?>
-         <kml xmlns="http://www.opengis.net/kml/2.2"
-              xmlns:gx="http://www.google.com/kml/ext/2.2">
-            <Document>`
+     <kml xmlns="http://www.opengis.net/kml/2.2"
+      xmlns:gx="http://www.google.com/kml/ext/2.2">
+      <Document>`
   }
 
   style() {
-    this.indent += 1;
-        return `<Style id="routeStyle">
-            <LineStyle id="ID">
-                <!-- inherited from ColorStyle -->
-                <color>7fff00ff</color>
-                <colorMode>normal</colorMode>      <!-- colorModeEnum: normal or random -->
+        return `
+        <Style id="routeStyle">
+          <LineStyle id="ID">
+            <!-- inherited from ColorStyle -->
+            <color>7fff00ff</color>
+            <colorMode>normal</colorMode>      <!-- colorModeEnum: normal or random -->
 
-                <!-- specific to LineStyle -->
-                <width>3</width>                            <!-- float -->
-                <gx:outerColor>ffffffff</gx:outerColor>     <!-- kml:color -->
-                <gx:outerWidth>0.0</gx:outerWidth>          <!-- float -->
-                <gx:physicalWidth>0.0</gx:physicalWidth>    <!-- float -->
-                <gx:labelVisibility>0</gx:labelVisibility>  <!-- boolean -->
-            </LineStyle>
+            <!-- specific to LineStyle -->
+            <width>3</width>                            <!-- float -->
+            <gx:outerColor>ffffffff</gx:outerColor>     <!-- kml:color -->
+            <gx:outerWidth>0.0</gx:outerWidth>          <!-- float -->
+            <gx:physicalWidth>0.0</gx:physicalWidth>    <!-- float -->
+            <gx:labelVisibility>0</gx:labelVisibility>  <!-- boolean -->
+          </LineStyle>
         </Style>
-        <Style id="wifi">
+
+        <StyleMap id="wifi">
+          <Pair><key>normal</key><styleUrl>#wifi_normal</styleUrl></Pair>
+          <Pair><key>highlight</key><styleUrl>#wifi_highlight</styleUrl></Pair>
+        </StyleMap>
+
+        <Style id="wifi_normal">
           <IconStyle>
             <Icon>
               <href>http://maps.google.com/mapfiles/kml/shapes/target.png</href>
             </Icon>
             <hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/>
+            <scale>0.6</scale>
           </IconStyle>
+          <LabelStyle>
+            <scale>0</scale>
+          </LabelStyle>
         </Style>
+
+        <Style id="wifi_highlight">
+          <IconStyle>
+            <Icon>
+              <href>http://maps.google.com/mapfiles/kml/shapes/target.png</href>
+            </Icon>
+            <hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/>
+            <scale>0.6</scale>
+          </IconStyle>
+          <LabelStyle>
+            <scale>1</scale>
+          </LabelStyle>
+        </Style>
+
         <Style id="go">
           <IconStyle>
             <scale>2.0</scale>
@@ -113,6 +146,7 @@ class KMLGenerator {
             <hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/>
           </IconStyle>
         </Style>
+
         <Style id="stop">
           <IconStyle>
             <scale>2.0</scale>
@@ -122,8 +156,70 @@ class KMLGenerator {
             <hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/>
           </IconStyle>
         </Style>
+
+        <Style id="radius">
+          <PolyStyle>
+            <!-- inherited from ColorStyle -->
+            <color>20ffff00</color>            <!-- kml:color -->
+            <colorMode>normal</colorMode>      <!-- kml:colorModeEnum: normal or random -->
+
+            <!-- specific to PolyStyle -->
+            <fill>1</fill>                     <!-- boolean -->
+            <outline>0</outline>               <!-- boolean -->
+          </PolyStyle>
+        </Style>
       `
   }
+
+  polygon({
+    name='',
+    points=[],
+    visibility=0,
+    when,
+    styleId='radius',
+  }) {
+    return `
+    <Placemark>
+      <name>${name}</name>
+      <styleUrl>#${styleId}</styleUrl>
+      ${this.timestamp({when: when})}
+      <gx:balloonVisibility>${visibility}</gx:balloonVisibility>
+      <extrude>0</extrude>
+      <altitudeMode>clampToGround</altitudeMode>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              ${points.join('\n')}
+              ${points[0]}
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+    `;
+  }
+
+  timestamp({
+    when='',
+  }) {
+    return when ? `<TimeStamp><when>${when}</when></TimeStamp>` : '';
+  }
+
+  openFolder({
+    name='',
+    open=false,
+    description='',
+  }) {
+    return `
+    <Folder>
+      <name>${name}</name>
+      <open>${open?1:0}</open>
+      ${description?'<description>' + description + '</description>':''}
+    `;
+  }
+
+  closeFolder() { return `</Folder>`; }
 
   placemark({
     name="Placemark",
@@ -135,20 +231,19 @@ class KMLGenerator {
     styleId='',
     when,
   }) {
-    let whenLine = when ? `<TimeStamp><when>${when}</when></TimeStamp>` : '';
-        return `
-        <Placemark>
-            <name>${name}</name>
-            <styleUrl>#${styleId}</styleUrl>
-            ${whenLine}
-            <description>
-            ${html?'<![CDATA[':''}
-              ${description}
-            ${html?']]>':''}
-            </description>
-            <gx:balloonVisibility>${visibility}</gx:balloonVisibility>
-            <Point><coordinates>${x},${y}</coordinates></Point>
-        </Placemark>`;
+      return `
+      <Placemark>
+          <name>${name}</name>
+          <styleUrl>#${styleId}</styleUrl>
+          ${this.timestamp({when: when})}
+          <description>
+          ${html?'<![CDATA[':''}
+            ${description}
+          ${html?']]>':''}
+          </description>
+          <gx:balloonVisibility>${visibility}</gx:balloonVisibility>
+          <Point><coordinates>${x},${y}</coordinates></Point>
+      </Placemark>`;
   }
 
   route({
@@ -214,6 +309,7 @@ function main() {
     description: 'This is the last recorded location',
     styleId: 'stop',
   }));
+  kmlLines.push(generator.openFolder({ name: 'WiFi Results'}));
   kmlLines.push(parser.getAllWifiLocations().map(wifiScan => {
     return generator.placemark({
       x: wifiScan.location.x,
@@ -222,18 +318,51 @@ function main() {
       name: 'Wifi Scan',
       when: wifiScan.location.timestamp,
       html: true,
-      description: wifiScan.wifi.reduce((str, item) => {
-        str += '<span style="color: blue;">' + item.ssid + '</span> <span style="color: gray;">' + item.mac + '</span> <i>rssi:' + item.rssi + '</i><br>';
-        return str;
-      }, ''),
+      description: wifiScan.wifi.map(item => {
+        return '<span style="color: blue;">' + item.ssid + '</span> <span style="color: gray;">' + item.mac + '</span> <i>rssi:' + item.rssi + '</i><br>';
+      }).join(''),
     });
   }));
+  kmlLines.push(generator.closeFolder());
+  kmlLines.push(generator.openFolder({ name: 'GPS Radii'}));
+  kmlLines.push(parser.getAllLocations().map(loc => {
+    let [ x, y ] = deltaDegreesFromMeters(loc.radius, loc.x);
+    let points = getCirclePoints(x, y, loc.x, loc.y);
+    return generator.polygon({
+      name: 'GPS radius',
+      points: points,
+      when: loc.timestamp,
+    });
+  }));
+  kmlLines.push(generator.closeFolder());
   kmlLines.push(generator.tail());
-
-  parser.getAllWifiLocations();
-
   console.log(kmlLines.join('\n'));
 }
 
 main();
+
+function getCirclePoints(rx, ry, xOffset, yOffset, n=16) {
+  let points = [];
+  let x, y;
+  let incr = Math.PI*2/n;
+  let start = Math.PI/2;
+  let finish = Math.PI*2.5
+  let theta = start;
+  while (theta < finish) {
+    x = rx * Math.cos(theta);
+    y = ry * Math.sin(theta);
+    points.push([x + xOffset, y + yOffset]);
+    theta += incr;
+  }
+  return points;
+}
+
+function deltaDegreesFromMeters(meters, latitude) {
+  const latDegreeInMeters = 11132;
+  const longDegreeInMeters = 40075000 * Math.cos(latitude) / 360;
+  return [
+    meters/latDegreeInMeters,
+    meters/longDegreeInMeters
+  ];
+}
 
