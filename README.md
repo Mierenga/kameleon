@@ -16,4 +16,4 @@ node default.js -f sample/maroon-bells.csv -o maroon-bells.kml
 
 ![start marker](google-earth-screenshots/start-marker.png)
 
-![start to finish](google-earth-screenshots/start-marker.png)
+![start to finish](google-earth-screenshots/start-to-finish.png)
