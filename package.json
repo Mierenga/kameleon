@@ -1,0 +1,25 @@
+{
+  "name": "kamel",
+  "version": "1.0.0",
+  "description": "",
+  "main": "gen.js",
+  "dependencies": {
+    "commander": "^7.2.0",
+    "moment": "^2.29.1",
+    "moment-timezone": "^0.5.33"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mierenga/kameleon.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Mierenga/kameleon/issues"
+  },
+  "homepage": "https://github.com/Mierenga/kameleon#readme"
+}
