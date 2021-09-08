@@ -14,6 +14,20 @@ npm install
 node default.js -f sample/maroon-bells.csv -o maroon-bells.kml
 ```
 
+```
+Options:
+  -V, --version            output the version number
+  -f, --file <filename>    set the input CSV file
+  -o, --output <filename>  set the output file path (defaults to stdout)
+  -c, --columns <columns>  comma separated string of ordered column names
+                             one of: "long,lat,time,rad,src,dev,plat,wifi"
+  -h, --help               display help for command
+
+Examples:
+  --timezone America/New_York
+  --columns "long,lat,time,rad,src,dev,plat,wifi"
+```
+
 ![start marker](google-earth-screenshots/start-marker.png)
 
 ![start to finish](google-earth-screenshots/start-to-finish.png)
