@@ -20,12 +20,14 @@ Options:
   -f, --file <filename>    set the input CSV file
   -o, --output <filename>  set the output file path (defaults to stdout)
   -c, --columns <columns>  comma separated string of ordered column names
-                             one of: "long,lat,time,rad,src,dev,plat,wifi"
+                           - recognized: "time,long,lat,rad,src,dev,plat,wifi"
+                           - required: long,lat
+  
   -h, --help               display help for command
 
 Examples:
   --timezone America/New_York
-  --columns "long,lat,time,rad,src,dev,plat,wifi"
+  --columns "time,long,lat,rad,src,dev,plat,wifi"
 ```
 
 ![start marker](google-earth-screenshots/start-marker.png)
