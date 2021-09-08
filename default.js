@@ -11,10 +11,13 @@ program
   // TODO: add timezone support
   // .option('-t, --timezone <zoneIdentifier>', 'set the timezone of KML timestamps')
   .option('-o, --output <filename>', 'set the output file path (defaults to stdout)')
+  .option('-c, --columns <columns>', `comma separated string of ordered column names
+                           one of: "long,lat,time,rad,src,dev,plat,wifi"`)
   .on('--help', () => {
     console.log(`
 Examples:
   --timezone America/New_York
+  --columns "long,lat,time,rad,src,dev,plat,wifi"
 `
     )
   })
@@ -24,16 +27,35 @@ main();
 
 
 function main() {
-  let csvColumns = [
-    { key: 'timestamp', type: 'date' },
-    { key: 'latitude', type: 'coordinate' },
-    { key: 'longitude', type: 'coordinate' },
-    { key: 'radius', type: 'meters' },
-    { key: 'source', type: 'string' },
-    { key: 'device', type: 'string' },
-    { key: 'platform', type: 'string' },
-    { key: 'wifi', type: 'list_wifi' },
+  const availableCSVColumns = [
+    { key: 'timestamp', type: 'date', alias: 'time' },
+    { key: 'latitude', type: 'coordinate', alias: 'lat' },
+    { key: 'longitude', type: 'coordinate', alias: 'long' },
+    { key: 'radius', type: 'meters', alias: 'rad' },
+    { key: 'source', type: 'string', alias: 'src' },
+    { key: 'device', type: 'string', alias: 'dev' },
+    { key: 'platform', type: 'string', alias: 'plat' },
+    { key: 'wifi', type: 'list_wifi', alias: 'wifi' },
   ];
+
+  let userColumns = program.opts().columns
+  if (userColumns) {
+    userColumns = userColumns.split(',')
+  }
+
+  const csvColumns = availableCSVColumns.filter(col => {
+    if (!userColumns) return true;
+    let userIndex = userColumns.indexOf(col.alias)
+    if (userIndex === -1) {
+      userIndex = userColumns.indexOf(col.key)
+    }
+    if (userIndex !== -1) {
+      col.index = userIndex
+      return true;
+    }
+    return false;
+  }).sort((a, b) => a.index < b.index ? -1 : 1);
+
   let parser = new LocationParser({
     filename: program.opts().file,
     csvColumns: csvColumns,
@@ -63,37 +85,41 @@ function main() {
     description: 'This is the last recorded location',
     styleId: 'stop',
   }));
-  kmlLines.push(generator.openFolder({ name: 'WiFi Results'}));
-  kmlLines.push(parser.getAllWifiLocations().map(wifiScan => {
-    return generator.placemark({
-      x: wifiScan.location.x,
-      y: wifiScan.location.y,
-      styleId: 'wifi',
-      name: 'Wifi Scan',
-      when: wifiScan.location.timestamp,
-      html: true,
-      description: wifiScan.wifi.map(item => {
-        return '<span style="color: blue;">' 
-          + item.ssid 
-          + '</span> <span style="color: gray;">' 
-          + item.mac 
-          + '</span> <i>rssi:' 
-          + item.rssi 
-          + '</i><br>';
-      }).join(''),
-    });
-  }));
-  kmlLines.push(generator.closeFolder());
-  kmlLines.push(generator.openFolder({ name: 'GPS Radii'}));
-  kmlLines.push(parser.getAllLocations().map(loc => {
-    let [ x, y ] = deltaDegreesFromMeters(loc.radius, loc.x);
-    return generator.polygon({
-      name: 'GPS radius: ' + loc.radius + ' meters',
-      points: circlePoints(x, y, loc.x, loc.y),
-      when: loc.timestamp,
-    });
-  }).join(''));
-  kmlLines.push(generator.closeFolder());
+  if (parser.hasWifiLocations()) {
+    kmlLines.push(generator.openFolder({ name: 'WiFi Results'}));
+    kmlLines.push((parser.getAllWifiLocations() || []).map(wifiScan => {
+      return generator.placemark({
+        x: wifiScan.location.x,
+        y: wifiScan.location.y,
+        styleId: 'wifi',
+        name: 'Wifi Scan',
+        when: wifiScan.location.timestamp,
+        html: true,
+        description: wifiScan.wifi.map(item => {
+          return '<span style="color: blue;">' 
+            + item.ssid 
+            + '</span> <span style="color: gray;">' 
+            + item.mac 
+            + '</span> <i>rssi:' 
+            + item.rssi 
+            + '</i><br>';
+        }).join(''),
+      });
+    }));
+    kmlLines.push(generator.closeFolder());
+  }
+  if (parser.hasRadii()) {
+    kmlLines.push(generator.openFolder({ name: 'GPS Radii'}));
+    kmlLines.push(parser.getAllLocations().map(loc => {
+      let [ x, y ] = deltaDegreesFromMeters(loc.radius, loc.x);
+      return generator.polygon({
+        name: 'GPS radius: ' + loc.radius + ' meters',
+        points: circlePoints(x, y, loc.x, loc.y),
+        when: loc.timestamp,
+      });
+    }).join(''));
+    kmlLines.push(generator.closeFolder());
+  }
   kmlLines.push(generator.tail());
   const output = program.opts().output;
   if (output) {
