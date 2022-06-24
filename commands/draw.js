@@ -1,7 +1,7 @@
 const fs = require('fs');
-const { LocationParser } = require('./lib/parser');
-const { KMLGenerator } = require('./lib/kml-generator');
-const { deltaDegreesFromMeters, circlePoints } = require('./lib/gps-util');
+const { KMLGenerator } = require('../lib/kml-generator');
+const { deltaDegreesFromMeters, circlePoints } = require('../lib/gps-util');
+const { main: distance } = require('./distance')
 
 /**
  * 
@@ -12,42 +12,10 @@ const { deltaDegreesFromMeters, circlePoints } = require('./lib/gps-util');
  *   output;
  * } options 
  */
-function main(options) {
-  const availableCSVColumns = [
-    { key: 'timestamp', type: 'date', alias: 'time' },
-    { key: 'latitude', type: 'coordinate', alias: 'lat' },
-    { key: 'longitude', type: 'coordinate', alias: 'long' },
-    { key: 'radius', type: 'meters', alias: 'rad' },
-    { key: 'source', type: 'string', alias: 'src' },
-    { key: 'device', type: 'string', alias: 'dev' },
-    { key: 'platform', type: 'string', alias: 'plat' },
-    { key: 'wifi', type: 'list_wifi', alias: 'wifi' },
-  ];
-
-  let userColumns = options.columns
-  if (userColumns) {
-    userColumns = userColumns.split(',')
-  }
-
-  const csvColumns = availableCSVColumns.filter(col => {
-    if (!userColumns) return true;
-    let userIndex = userColumns.indexOf(col.alias)
-    if (userIndex === -1) {
-      userIndex = userColumns.indexOf(col.key)
-    }
-    if (userIndex !== -1) {
-      col.index = userIndex
-      return true;
-    }
-    return false;
-  }).sort((a, b) => a.index < b.index ? -1 : 1);
-
-  let parser = new LocationParser({
-    filename: options.file,
-    csvColumns: csvColumns,
-    timezone: options.timezone,
-  });
-
+function main({
+  options: { output, radii, wifi },
+  plugins: { parser },
+}) {
   let generator = new KMLGenerator();
   let kmlLines = [];
 
@@ -68,10 +36,11 @@ function main(options) {
     x: end.x,
     y: end.y,
     name: 'Finish',
-    description: 'This is the last recorded location',
+    description: `This is the last recorded location<br><b>distance travelled: </b>${distance({ plugins: { parser }})}`,
+    html: true,
     styleId: 'stop',
   }));
-  if (parser.hasWifiLocations()) {
+  if (wifi && parser.hasWifiLocations()) {
     kmlLines.push(generator.openFolder({ name: 'WiFi Results'}));
     kmlLines.push((parser.getAllWifiLocations() || []).map(wifiScan => {
       return generator.placemark({
@@ -94,7 +63,7 @@ function main(options) {
     }));
     kmlLines.push(generator.closeFolder());
   }
-  if (parser.hasRadii()) {
+  if (radii && parser.hasRadii()) {
     kmlLines.push(generator.openFolder({ name: 'GPS Radii'}));
     kmlLines.push(parser.getAllLocations().map(loc => {
       let [ x, y ] = deltaDegreesFromMeters(loc.radius, loc.x);
@@ -107,7 +76,6 @@ function main(options) {
     kmlLines.push(generator.closeFolder());
   }
   kmlLines.push(generator.tail());
-  const output = options.output;
   const kml = kmlLines.join('\n')
   if (output) {
     fs.writeFileSync(output, kml);
